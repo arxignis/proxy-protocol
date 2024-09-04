@@ -142,7 +142,7 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
                 needs: 108usize * 2,
             },
         );
-        ensure!(buf.remaining() >= 108 * 2, UnexpectedEof);
+        ensure!(buf.remaining() >= length, UnexpectedEof);
         let mut source = [0u8; 108];
         let mut destination = [0u8; 108];
         buf.copy_to_slice(&mut source[..]);
@@ -177,7 +177,7 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
         },
     );
     ensure!(
-        buf.remaining() >= port_length + address_length,
+        buf.remaining() >= length,
         UnexpectedEof,
     );
 
