@@ -175,6 +175,8 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
     buf.advance(count);
 
     ensure!(buf.get_u8() == CR, IllegalHeaderEnding);
+    // We only checked up to the CR
+    ensure!(buf.remaining() >= 1, UnexpectedEof);
     ensure!(buf.get_u8() == LF, IllegalHeaderEnding);
 
     let addresses = match (source, destination) {

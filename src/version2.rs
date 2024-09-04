@@ -459,6 +459,23 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
         ProxyAddressFamily::Unix => 108 * 2,
         ProxyAddressFamily::Unspec => 0,
     };
+    if address_family == ProxyAddressFamily::Unix {
+        ensure!(
+            length >= 108 * 2,
+            InsufficientLengthSpecified {
+                given: length,
+                needs: 108usize * 2,
+            },
+        );
+        ensure!(buf.remaining() >= length, UnexpectedEof);
+        let mut source = [0u8; 108];
+        let mut destination = [0u8; 108];
+        buf.copy_to_slice(&mut source[..]);
+        buf.copy_to_slice(&mut destination[..]);
+        // TODO(Mariell Hoversholm): Support TLVs
+        if length > 108 * 2 {
+            buf.advance(length - (108 * 2));
+        }
 
     let mut ext_len =
         length
