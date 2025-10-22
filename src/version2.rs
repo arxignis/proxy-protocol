@@ -3,6 +3,7 @@ use snafu::{ensure, Snafu};
 use std::convert::TryInto;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
+
 #[derive(Debug, Snafu)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum ParseError {
@@ -140,14 +141,14 @@ trait Tlv: Sized {
 
     fn parse(buf: &mut impl Buf) -> Result<Self, ParseError> {
         if buf.remaining() < 3 {
-            return Err(ParseError::UnexpectedEof);
+            return UnexpectedEofSnafu.fail();
         }
         let type_id = buf.get_u8();
         let vlen = buf.get_u16();
         let expected_rem = buf
             .remaining()
             .checked_sub(vlen.into())
-            .ok_or(ParseError::UnexpectedEof)?;
+            .ok_or_else(|| ParseError::UnexpectedEof)?;
         let r = Self::parse_parts(type_id, vlen, buf)?;
         // Assert, because it would be an internal error
         assert_eq!(buf.remaining(), expected_rem);
@@ -231,7 +232,7 @@ impl Tlv for SslExtensionTlv {
             PP2_SUBTYPE_SSL_SIG_ALG => Self::Version(ascii_from_buf(buf, len)?),
             PP2_SUBTYPE_SSL_KEY_ALG => Self::Version(ascii_from_buf(buf, len)?),
             PP2_SUBTYPE_SSL_CN => Self::Version(str_from_buf(buf, len)?),
-            _ => return Err(ParseError::InvalidTlvTypeId { type_id }),
+            _ => return InvalidTlvTypeIdSnafu { type_id }.fail(),
         })
     }
 }
@@ -246,11 +247,11 @@ pub struct Ssl {
 impl Ssl {
     fn parse(buf: &mut impl Buf, len: u16) -> Result<Self, ParseError> {
         if buf.remaining() < len.into() {
-            return Err(ParseError::UnexpectedEof);
+            return UnexpectedEofSnafu.fail();
         }
         let mut ext_len = len
             .checked_sub(5)
-            .ok_or(ParseError::InsufficientLengthSpecified {
+            .ok_or_else(|| ParseError::InsufficientLengthSpecified {
                 given: len.into(),
                 needs: 5,
             })?;
@@ -272,7 +273,7 @@ impl Ssl {
             // new value is lower.
             ext_len = usize::from(ext_len)
                 .checked_sub(parsed)
-                .ok_or(ParseError::InsufficientLengthSpecified {
+                .ok_or_else(|| ParseError::InsufficientLengthSpecified {
                     given: ext_len.into(),
                     needs: parsed,
                 })?
@@ -398,7 +399,7 @@ impl Tlv for ExtensionTlv {
             PP2_TYPE_UNIQUE_ID => Self::UniqueId(vec_from_buf(buf, len)),
             PP2_TYPE_SSL => Self::Ssl(Ssl::parse(buf, len)?),
             PP2_TYPE_NETNS => Self::NetNs(ascii_from_buf(buf, len)?),
-            _ => return Err(ParseError::InvalidTlvTypeId { type_id }),
+            _ => return InvalidTlvTypeIdSnafu { type_id }.fail(),
         })
     }
 }
@@ -424,12 +425,12 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
     let command = match command {
         0 => ProxyCommand::Local,
         1 => ProxyCommand::Proxy,
-        cmd => return UnknownCommand { cmd }.fail(),
+        cmd => return UnknownCommandSnafu { cmd }.fail(),
     };
 
     // 4 bits for address family, 4 bits for transport protocol,
     // then 2 bytes for the length.
-    ensure!(buf.remaining() >= 3, UnexpectedEof);
+    ensure!(buf.remaining() >= 3, UnexpectedEofSnafu);
 
     let byte = buf.get_u8();
     let address_family = match byte >> 4 {
@@ -437,17 +438,17 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
         1 => ProxyAddressFamily::Inet,
         2 => ProxyAddressFamily::Inet6,
         3 => ProxyAddressFamily::Unix,
-        family => return UnknownAddressFamily { family }.fail(),
+        family => return UnknownAddressFamilySnafu { family }.fail(),
     };
     let transport_protocol = match byte << 4 >> 4 {
         0 => ProxyTransportProtocol::Unspec,
         1 => ProxyTransportProtocol::Stream,
         2 => ProxyTransportProtocol::Datagram,
-        protocol => return UnknownTransportProtocol { protocol }.fail(),
+        protocol => return UnknownTransportProtocolSnafu { protocol }.fail(),
     };
 
     let length = buf.get_u16() as usize;
-    ensure!(buf.remaining() >= length, UnexpectedEof);
+    ensure!(buf.remaining() >= length, UnexpectedEofSnafu);
 
     // Time to parse the following:
     //
@@ -481,12 +482,12 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
     if address_family == ProxyAddressFamily::Unix {
         ensure!(
             length >= 108 * 2,
-            InsufficientLengthSpecified {
+            InsufficientLengthSpecifiedSnafu {
                 given: length,
                 needs: 108usize * 2,
-            },
+            }
         );
-        ensure!(buf.remaining() >= length, UnexpectedEof);
+        ensure!(buf.remaining() >= length, UnexpectedEofSnafu);
         let mut source = [0u8; 108];
         let mut destination = [0u8; 108];
         buf.copy_to_slice(&mut source[..]);
@@ -500,11 +501,11 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
     let mut ext_len =
         length
             .checked_sub(address_len)
-            .ok_or(ParseError::InsufficientLengthSpecified {
+            .ok_or_else(|| ParseError::InsufficientLengthSpecified {
                 given: length,
                 needs: address_len,
             })?;
-    ensure!(buf.remaining() >= address_len, UnexpectedEof,);
+    ensure!(buf.remaining() >= address_len, UnexpectedEofSnafu,);
 
     let addresses = match address_family {
         ProxyAddressFamily::Unspec => ProxyAddresses::Unspec,
@@ -567,7 +568,7 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
             let skip_len = buf.get_u16();
             let noop_len = 3u16
                 .checked_add(skip_len)
-                .ok_or(ParseError::LengthOverflow {
+                .ok_or_else(|| ParseError::LengthOverflow {
                     given: skip_len.into(),
                 })?
                 .into();
@@ -586,7 +587,7 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
             ext_len =
                 ext_len
                     .checked_sub(parsed)
-                    .ok_or(ParseError::InsufficientLengthSpecified {
+                    .ok_or_else(|| ParseError::InsufficientLengthSpecified {
                         given: ext_len,
                         needs: parsed,
                     })?;
@@ -1085,7 +1086,7 @@ mod parse_tests {
     #[test]
     fn test_invalid_data() {
         let mut data = [0u8; 200];
-        rand::thread_rng().fill_bytes(&mut data);
+        rand::rng().fill_bytes(&mut data);
         data[0] = 99; // Make 100% sure it's invalid.
         assert!(parse_fully(&mut &data[..]).is_err());
 
