@@ -1,5 +1,6 @@
 use bytes::{Buf, BufMut as _, BytesMut};
 use snafu::{ensure, Snafu};
+use std::convert::TryInto;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 #[derive(Debug, Snafu)]
@@ -494,6 +495,7 @@ pub(crate) fn parse(buf: &mut impl Buf) -> Result<super::ProxyHeader, ParseError
         if length > 108 * 2 {
             buf.advance(length - (108 * 2));
         }
+    }
 
     let mut ext_len =
         length
