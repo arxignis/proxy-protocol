@@ -16,6 +16,7 @@ pub mod version2;
 use bytes::{Buf, BytesMut};
 use snafu::{ensure, ResultExt as _, Snafu};
 
+
 #[derive(Debug, Snafu)]
 #[cfg_attr(not(feature = "always_exhaustive"), non_exhaustive)] // A new version may be added
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -79,7 +80,7 @@ pub enum ProxyHeader {
 
 fn parse_version(buf: &mut impl Buf) -> Result<u32, ParseError> {
     // There is a 6 byte header to v1, 12 byte to all binary versions.
-    ensure!(buf.remaining() >= 6, NotProxyHeader);
+    ensure!(buf.remaining() >= 6, NotProxyHeaderSnafu);
 
     // V1 is the only version that starts with "PROXY" (0x50 0x52 0x4F 0x58
     // 0x59), and we can therefore decide version based on that.
@@ -91,11 +92,11 @@ fn parse_version(buf: &mut impl Buf) -> Result<u32, ParseError> {
     }
 
     // Now we require 13: 12 for the prefix, 1 for the version + command
-    ensure!(buf.remaining() >= 13, NotProxyHeader);
+    ensure!(buf.remaining() >= 13, NotProxyHeaderSnafu);
     ensure!(
         buf.chunk()[..12]
             == [0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A],
-        NotProxyHeader
+        NotProxyHeaderSnafu
     );
     buf.advance(12);
 
@@ -117,7 +118,7 @@ fn parse_version(buf: &mut impl Buf) -> Result<u32, ParseError> {
 
     // Interesting edge-case! This is the only time version 1 would be invalid.
     if version == 1 {
-        return InvalidVersion { version: 1u32 }.fail();
+        return InvalidVersionSnafu { version: 1u32 }.fail();
     }
 
     Ok(version as u32)
@@ -135,9 +136,9 @@ pub fn parse(buf: &mut impl Buf) -> Result<ProxyHeader, ParseError> {
     };
 
     Ok(match version {
-        1 => self::version1::parse(buf).context(Version1)?,
-        2 => self::version2::parse(buf).context(Version2)?,
-        _ => return InvalidVersion { version }.fail(),
+        1 => self::version1::parse(buf).context(Version1Snafu)?,
+        2 => self::version2::parse(buf).context(Version2Snafu)?,
+        _ => return InvalidVersionSnafu { version }.fail(),
     })
 }
 
@@ -148,7 +149,7 @@ pub fn parse(buf: &mut impl Buf) -> Result<ProxyHeader, ParseError> {
 pub fn encode(header: ProxyHeader) -> Result<BytesMut, EncodeError> {
     Ok(match header {
         ProxyHeader::Version1 { addresses, .. } => {
-            version1::encode(addresses).context(WriteVersion1)?
+            version1::encode(addresses).context(WriteVersion1Snafu)?
         }
         ProxyHeader::Version2 {
             command,
@@ -156,7 +157,7 @@ pub fn encode(header: ProxyHeader) -> Result<BytesMut, EncodeError> {
             addresses,
             extensions,
         } => version2::encode(command, transport_protocol, addresses, &extensions[..])
-            .context(WriteVersion2)?,
+            .context(WriteVersion2Snafu)?,
 
         #[allow(unreachable_patterns)] // May be required to be exhaustive.
         _ => unimplemented!("Unimplemented version?"),
@@ -188,7 +189,7 @@ mod parse_tests {
         );
 
         let mut random = [0u8; 128];
-        rand::thread_rng().fill_bytes(&mut random);
+        rand::rng().fill_bytes(&mut random);
         let mut header = b"PROXY UNKNOWN ".to_vec();
         header.extend(&random[..]);
         header.extend(b"\r\n");
@@ -629,7 +630,7 @@ mod parse_tests {
         assert!(data.remaining() == 4); // Consume the entire header
 
         let mut data = [0u8; 200];
-        rand::thread_rng().fill_bytes(&mut data);
+        rand::rng().fill_bytes(&mut data);
         data[0] = 99; // Make 100% sure it's invalid.
         assert!(parse(&mut &data[..]).is_err());
 
